@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+storage/cookies.json
+storage/history.json
+storage/*.log
+storage/*.png
+debug_login.py
+.venv/
+venv/
+.claude/

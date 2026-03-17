@@ -1,0 +1,7 @@
+services:
+  hh-bot:
+    build: .
+    env_file: .env
+    volumes:
+      - ./storage:/app/storage
+    restart: unless-stopped
