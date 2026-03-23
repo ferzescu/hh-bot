@@ -31,7 +31,11 @@ class ApplicationHistory:
             json.dump(self.data, f, ensure_ascii=False, indent=2)
 
     def is_applied(self, vacancy_id: str) -> bool:
-        return str(vacancy_id) in self.data
+        entry = self.data.get(str(vacancy_id))
+        if not entry:
+            return False
+        status = entry.get("status", "")
+        return status in ("applied", "already_applied")
 
     def record(
         self,

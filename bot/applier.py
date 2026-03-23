@@ -131,13 +131,14 @@ def _apply_to_vacancy(page: Page, cover_letter: str, resume_id: str = "") -> str
     """
     # Ждём загрузки страницы вакансии
     try:
-        page.wait_for_selector(
+        page.locator(
             '[data-qa="vacancy-response-link-top"], '
-            '[data-qa="vacancy-response-link-top-quick"], '
-            'text=Откликнуться, '
-            'text=Вы уже откликнулись',
-            timeout=10000,
-        )
+            '[data-qa="vacancy-response-link-top-quick"]'
+        ).or_(
+            page.get_by_text("Откликнуться", exact=True)
+        ).or_(
+            page.get_by_text("Вы уже откликнулись")
+        ).first.wait_for(timeout=10000)
     except Exception:
         current_url = page.url
         log.warning("  Кнопка отклика не найдена. URL: %s", current_url)
@@ -145,7 +146,7 @@ def _apply_to_vacancy(page: Page, cover_letter: str, resume_id: str = "") -> str
         return "no_apply_button"
 
     # Проверяем, не откликались ли уже
-    responded = page.locator("text=Вы уже откликнулись")
+    responded = page.get_by_text("Вы уже откликнулись")
     if responded.count() > 0:
         return "already_applied"
 
@@ -155,14 +156,13 @@ def _apply_to_vacancy(page: Page, cover_letter: str, resume_id: str = "") -> str
         respond_btn = page.locator('[data-qa="vacancy-response-link-top-quick"]')
     # Фоллбек: ищем по тексту кнопки
     if respond_btn.count() == 0:
-        respond_btn = page.get_by_role("link", name="Откликнуться")
-    if respond_btn.count() == 0:
-        respond_btn = page.get_by_role("button", name="Откликнуться")
+        respond_btn = page.get_by_text("Откликнуться", exact=True)
     if respond_btn.count() == 0:
         page.screenshot(path="/app/storage/debug_no_apply.png")
         return "no_apply_button"
 
-    respond_btn.first.click()
+    respond_btn.first.scroll_into_view_if_needed()
+    respond_btn.first.click(force=True)
     page.wait_for_timeout(2000)
 
     # Модальное окно отклика
