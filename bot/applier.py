@@ -140,7 +140,7 @@ def _apply_to_vacancy(page: Page, cover_letter: str, resume_id: str = "") -> str
         ).or_(
             page.get_by_text("Откликнуться", exact=True)
         ).or_(
-            page.get_by_text("Вы уже откликнулись")
+            page.get_by_text("Вы откликнулись")
         ).first.wait_for(timeout=10000)
     except Exception:
         current_url = page.url
@@ -148,8 +148,8 @@ def _apply_to_vacancy(page: Page, cover_letter: str, resume_id: str = "") -> str
         page.screenshot(path="/app/storage/debug_no_apply.png")
         return "no_apply_button"
 
-    # Проверяем, не откликались ли уже
-    responded = page.get_by_text("Вы уже откликнулись")
+    # Проверяем, не откликались ли уже (hh.ru показывает и "Вы откликнулись" и "Вы уже откликнулись")
+    responded = page.get_by_text("Вы откликнулись")
     if responded.count() > 0:
         return "already_applied"
 
@@ -167,6 +167,12 @@ def _apply_to_vacancy(page: Page, cover_letter: str, resume_id: str = "") -> str
     respond_btn.first.scroll_into_view_if_needed()
     respond_btn.first.click(force=True)
     page.wait_for_timeout(2000)
+
+    # Обработка попапа "Вы откликаетесь на вакансию в другой стране"
+    foreign_confirm = page.get_by_text("Все равно откликнуться", exact=True)
+    if foreign_confirm.count() > 0 and foreign_confirm.first.is_visible():
+        foreign_confirm.first.click()
+        page.wait_for_timeout(2000)
 
     # Проверяем: если это кастомная форма работодателя (с доп. вопросами) — пропускаем
     custom_form = page.locator("text=Писать тут")
