@@ -35,7 +35,7 @@ class ApplicationHistory:
         if not entry:
             return False
         status = entry.get("status", "")
-        return status in ("applied", "already_applied")
+        return status in ("applied", "already_applied") or status.startswith("skipped:")
 
     def record(
         self,

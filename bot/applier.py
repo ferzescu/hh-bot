@@ -100,6 +100,9 @@ def run_auto_apply(
                 log.info("  Уже откликались ранее")
                 history.record(vacancy_id, title, employer, url, "already_applied")
                 skipped_count += 1
+            elif result == "custom_form_skipped":
+                history.record(vacancy_id, title, employer, url, "skipped: custom_form")
+                skipped_count += 1
             else:
                 log.warning("  Ошибка отклика: %s", result)
                 history.record(vacancy_id, title, employer, url, f"error: {result}")
@@ -165,6 +168,12 @@ def _apply_to_vacancy(page: Page, cover_letter: str, resume_id: str = "") -> str
     respond_btn.first.click(force=True)
     page.wait_for_timeout(2000)
 
+    # Проверяем: если это кастомная форма работодателя (с доп. вопросами) — пропускаем
+    custom_form = page.locator("text=Писать тут")
+    if custom_form.count() >= 2:
+        log.info("  Пропуск: кастомная форма с вопросами работодателя")
+        return "custom_form_skipped"
+
     # Модальное окно отклика
     # Шаг 1: Выбор резюме (если есть несколько)
     _select_resume(page, resume_id)
@@ -176,13 +185,15 @@ def _apply_to_vacancy(page: Page, cover_letter: str, resume_id: str = "") -> str
     # Шаг 3: Отправка
     submit_btn = page.locator('[data-qa="vacancy-response-submit-popup"]')
     if submit_btn.count() > 0:
-        submit_btn.first.click()
+        submit_btn.first.scroll_into_view_if_needed()
+        submit_btn.first.click(force=True)
         page.wait_for_timeout(2000)
     else:
         # Альтернативная кнопка отправки
         alt_submit = page.locator('[data-qa="vacancy-response-letter-submit"]')
         if alt_submit.count() > 0:
-            alt_submit.first.click()
+            alt_submit.first.scroll_into_view_if_needed()
+            alt_submit.first.click(force=True)
             page.wait_for_timeout(2000)
 
     # Проверяем результат
@@ -196,6 +207,7 @@ def _apply_to_vacancy(page: Page, cover_letter: str, resume_id: str = "") -> str
         if page.locator(selector).count() > 0:
             return "applied"
 
+    page.screenshot(path="/app/storage/debug_unknown_state.png")
     return "unknown_state"
 
 
@@ -249,8 +261,12 @@ def _fill_cover_letter(page: Page, cover_letter: str) -> None:
     if toggle_btn.count() == 0:
         toggle_btn = page.get_by_text("сопроводительное", exact=False)
     if toggle_btn.count() > 0 and toggle_btn.first.is_visible():
-        toggle_btn.first.click()
-        page.wait_for_timeout(1000)
+        try:
+            toggle_btn.first.scroll_into_view_if_needed()
+            toggle_btn.first.click(force=True, timeout=5000)
+            page.wait_for_timeout(1000)
+        except Exception:
+            log.debug("  Не удалось кликнуть на кнопку сопроводительного")
 
     # Вариант 4: найти любую видимую textarea на странице
     textareas = page.locator("textarea")
