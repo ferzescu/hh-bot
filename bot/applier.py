@@ -71,6 +71,14 @@ def run_auto_apply(
         log.info("Обработка: %s @ %s (ID: %s)", title, employer, vacancy_id)
 
         try:
+            # Проверяем авторизацию при серии ошибок
+            if error_count > 0 and error_count % 3 == 0:
+                log.info("Серия ошибок — проверяю авторизацию...")
+                if not ensure_logged_in(context, page, username, password):
+                    log.error("Сессия потеряна, не удалось перелогиниться")
+                    break
+                save_cookies(context)
+
             # Получаем описание вакансии для cover letter
             description = get_vacancy_description(page, url)
 
@@ -103,6 +111,13 @@ def run_auto_apply(
             elif result == "custom_form_skipped":
                 history.record(vacancy_id, title, employer, url, "skipped: custom_form")
                 skipped_count += 1
+            elif result == "session_expired":
+                log.warning("  Сессия протухла — перелогиниваюсь")
+                if not ensure_logged_in(context, page, username, password):
+                    log.error("Не удалось перелогиниться — останавливаюсь")
+                    break
+                save_cookies(context)
+                error_count += 1
             else:
                 log.warning("  Ошибка отклика: %s", result)
                 history.record(vacancy_id, title, employer, url, f"error: {result}")
@@ -164,15 +179,34 @@ def _apply_to_vacancy(page: Page, cover_letter: str, resume_id: str = "") -> str
         page.screenshot(path="/app/storage/debug_no_apply.png")
         return "no_apply_button"
 
+    # Проверяем что мы залогинены на этой странице
+    if page.get_by_text("Войти", exact=True).count() > 0:
+        header = page.locator("header")
+        if header.count() > 0 and "Войти" in (header.first.inner_text() or ""):
+            log.warning("  Не залогинены на странице вакансии")
+            return "session_expired"
+
     respond_btn.first.scroll_into_view_if_needed()
-    respond_btn.first.click(force=True)
+    respond_btn.first.click()
     page.wait_for_timeout(2000)
+
+    # Если после клика нас отправило на логин — сессия протухла
+    if "/account/login" in page.url:
+        log.warning("  Сессия протухла — перенаправлен на логин")
+        return "session_expired"
+
+    # Быстрый отклик: hh.ru иногда отправляет отклик без модального окна
+    # и сразу перенаправляет на другую страницу
+    if _check_applied(page):
+        return "applied"
 
     # Обработка попапа "Вы откликаетесь на вакансию в другой стране"
     foreign_confirm = page.get_by_text("Все равно откликнуться", exact=True)
     if foreign_confirm.count() > 0 and foreign_confirm.first.is_visible():
         foreign_confirm.first.click()
         page.wait_for_timeout(2000)
+        if _check_applied(page):
+            return "applied"
 
     # Проверяем: если это кастомная форма работодателя (с доп. вопросами) — пропускаем
     custom_form = page.locator("text=Писать тут")
@@ -202,19 +236,45 @@ def _apply_to_vacancy(page: Page, cover_letter: str, resume_id: str = "") -> str
             alt_submit.first.click(force=True)
             page.wait_for_timeout(2000)
 
-    # Проверяем результат
-    success_indicators = [
-        "text=Вы откликнулись",
-        "text=Отклик отправлен",
-        '[data-qa="vacancy-response-link-top-after"]',
-        "text=Вы уже откликнулись",
-    ]
-    for selector in success_indicators:
-        if page.locator(selector).count() > 0:
-            return "applied"
+    if _check_applied(page):
+        return "applied"
 
-    page.screenshot(path="/app/storage/debug_unknown_state.png")
+    # Диагностика: логируем URL и ключевой текст страницы
+    log.warning("  unknown_state URL: %s", page.url)
+    try:
+        body_text = page.locator("body").first.inner_text()[:500]
+        log.warning("  unknown_state page text: %s", body_text.replace("\n", " | "))
+    except Exception:
+        pass
+    page.screenshot(path="/app/storage/debug_unknown_state.png", full_page=True)
     return "unknown_state"
+
+
+def _check_applied(page: Page) -> bool:
+    """Проверяет, был ли отклик отправлен."""
+    checks = {
+        "Вы откликнулись": page.get_by_text("Вы откликнулись"),
+        "Отклик отправлен": page.get_by_text("Отклик отправлен"),
+        "response-link-after": page.locator('[data-qa="vacancy-response-link-top-after"]'),
+        "Вам подойдут": page.get_by_text("Вам подойдут эти вакансии"),
+        "Отклик другим": page.get_by_text("Отклик другим резюме"),
+        "Откликнуться нет": page.get_by_text("Откликнуться", exact=True),
+    }
+    for name, loc in checks.items():
+        cnt = loc.count()
+        if cnt > 0 and name != "Откликнуться нет":
+            log.debug("  _check_applied: найдено '%s' (%d)", name, cnt)
+            return True
+    # Если кнопки "Откликнуться" больше нет — значит уже откликнулись
+    if checks["Откликнуться нет"].count() == 0:
+        # Но только если мы на странице вакансии
+        if "/vacancy/" in page.url:
+            log.debug("  _check_applied: кнопка 'Откликнуться' исчезла — считаем отклик отправленным")
+            return True
+    # Проверяем URL — после быстрого отклика hh.ru редиректит
+    if "/vacancy_response" in page.url or "thank" in page.url:
+        return True
+    return False
 
 
 def _select_resume(page: Page, resume_id: str) -> None:

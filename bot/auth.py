@@ -39,7 +39,13 @@ def is_logged_in(page: Page) -> bool:
     """Проверяет авторизацию, открыв страницу резюме."""
     page.goto(RESUMES_URL, wait_until="domcontentloaded", timeout=30000)
     # Если редиректит на логин — не авторизованы
-    return "/account/login" not in page.url
+    if "/account/login" in page.url:
+        return False
+    # Дополнительная проверка: ищем элементы залогиненного пользователя
+    page.wait_for_timeout(1000)
+    if page.get_by_text("Войти", exact=True).count() > 0:
+        return False
+    return True
 
 
 def login(page: Page, username: str, password: str) -> bool:
