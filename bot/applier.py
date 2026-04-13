@@ -188,7 +188,11 @@ def _apply_to_vacancy(page: Page, cover_letter: str, resume_id: str = "") -> str
 
     respond_btn.first.scroll_into_view_if_needed()
     respond_btn.first.click()
-    page.wait_for_timeout(2000)
+    page.wait_for_timeout(3000)
+
+    # Скриншот после клика для диагностики
+    page.screenshot(path="/app/storage/debug_after_click.png", full_page=True)
+    log.info("  После клика URL: %s", page.url)
 
     # Если после клика нас отправило на логин — сессия протухла
     if "/account/login" in page.url:
@@ -241,6 +245,10 @@ def _apply_to_vacancy(page: Page, cover_letter: str, resume_id: str = "") -> str
 
     # Диагностика: логируем URL и ключевой текст страницы
     log.warning("  unknown_state URL: %s", page.url)
+    # Проверяем — может кнопка "Откликнуться" исчезла, но явного подтверждения нет
+    apply_btn_gone = page.get_by_text("Откликнуться", exact=True).count() == 0
+    log.warning("  unknown_state кнопка 'Откликнуться' %s",
+                "исчезла" if apply_btn_gone else "всё ещё на странице")
     try:
         body_text = page.locator("body").first.inner_text()[:500]
         log.warning("  unknown_state page text: %s", body_text.replace("\n", " | "))
@@ -251,28 +259,26 @@ def _apply_to_vacancy(page: Page, cover_letter: str, resume_id: str = "") -> str
 
 
 def _check_applied(page: Page) -> bool:
-    """Проверяет, был ли отклик отправлен."""
-    checks = {
+    """Проверяет, был ли отклик отправлен.
+
+    Считаем успехом ТОЛЬКО явные индикаторы от hh.ru.
+    Отсутствие кнопки 'Откликнуться' НЕ считается подтверждением —
+    кнопка может исчезнуть из-за недогрузки страницы или редиректа.
+    """
+    positive_checks = {
         "Вы откликнулись": page.get_by_text("Вы откликнулись"),
         "Отклик отправлен": page.get_by_text("Отклик отправлен"),
         "response-link-after": page.locator('[data-qa="vacancy-response-link-top-after"]'),
-        "Вам подойдут": page.get_by_text("Вам подойдут эти вакансии"),
         "Отклик другим": page.get_by_text("Отклик другим резюме"),
-        "Откликнуться нет": page.get_by_text("Откликнуться", exact=True),
     }
-    for name, loc in checks.items():
+    for name, loc in positive_checks.items():
         cnt = loc.count()
-        if cnt > 0 and name != "Откликнуться нет":
-            log.debug("  _check_applied: найдено '%s' (%d)", name, cnt)
-            return True
-    # Если кнопки "Откликнуться" больше нет — значит уже откликнулись
-    if checks["Откликнуться нет"].count() == 0:
-        # Но только если мы на странице вакансии
-        if "/vacancy/" in page.url:
-            log.debug("  _check_applied: кнопка 'Откликнуться' исчезла — считаем отклик отправленным")
+        if cnt > 0:
+            log.info("  _check_applied: подтверждение '%s' (%d)", name, cnt)
             return True
     # Проверяем URL — после быстрого отклика hh.ru редиректит
     if "/vacancy_response" in page.url or "thank" in page.url:
+        log.info("  _check_applied: подтверждение по URL — %s", page.url)
         return True
     return False
 
